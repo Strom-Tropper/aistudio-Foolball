@@ -1,0 +1,7 @@
+{
+  "name": "Football Dribble",
+  "description": "Risk-reward football betting game combining Mines and Cashout mechanics with tactical cards and stadium action.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
