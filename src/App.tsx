@@ -331,22 +331,9 @@ export default function App() {
       }
 
       if (cardType === 'SHIELD') {
-        // Arm 50% loss preservation & tag blocked cell if currently tackled
-        const updatedGrid = prev.grid.map((cList, cIdx) => {
-          if (cIdx === currentCol && currentRow !== null && prev.subState === 'BLOCKED') {
-            return cList.map((c, rIdx) => {
-              if (rIdx === currentRow) {
-                return { ...c, resolvedWithCard: 'SHIELD' as const };
-              }
-              return c;
-            });
-          }
-          return cList;
-        });
-
+        // Insurance only. The column, the route, and the confrontation stay where they are.
         return {
           ...prev,
-          grid: updatedGrid,
           cardInventory: updatedInventory,
           cardsUsedThisMatch: updatedUsedCards,
           isShieldArmed: true,

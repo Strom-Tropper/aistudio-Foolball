@@ -50,6 +50,7 @@ export class GoalkeeperController {
     this.targetY = this.animator.calculateAnticipationY(netCenterY, strikerY, ballY, isPlaying, isShootingGoal);
 
     this.currentY += (this.targetY - this.currentY) * 0.12 * dt;
+    this.sprite.step(dt);
     this.sprite.container.position.set(this.posX, this.currentY);
   }
 }

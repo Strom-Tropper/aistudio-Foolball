@@ -18,6 +18,7 @@ export class PlayerController {
 
   public currentPos = { x: 0, y: 0 };
   public targetPos = { x: 0, y: 0 };
+  public moving = false;
 
   constructor() {
     this.sprite = new PlayerSprite();
@@ -46,6 +47,10 @@ export class PlayerController {
     this.sprite.setPose(pose);
   }
 
+  public playDodge(): void {
+    this.sprite.playDodge();
+  }
+
   /**
    * Calculate and update target coordinates from match GameState
    */
@@ -54,10 +59,13 @@ export class PlayerController {
     gridStartX: number,
     gridStartY: number,
     cellWidth: number,
-    cellHeight: number,
-    pitchWidth: number
+    cellHeight: number
   ): void {
     const centerY = gridStartY + (cellHeight * GRID_ROWS) / 2;
+    const stand = (col: number, row: number) => ({
+      x: gridStartX + col * cellWidth + cellWidth / 2,
+      y: gridStartY + row * cellHeight + cellHeight / 2 + 18,
+    });
 
     const isBlocked =
       state.subState === 'BLOCKED' ||
@@ -67,53 +75,46 @@ export class PlayerController {
       state.subState === 'GOAL' ||
       (state.phase === 'END' && state.lastRound?.result === 'GOAL_SCORED');
 
-    if (isBlocked) {
-      // RULE: When defender is encountered, player remains on the PREVIOUS successfully cleared cell!
-      // The player must not move to a different row or teleport to the blocked cell.
+    const substituteRow =
+      state.subState === 'DRIBBLING'
+        ? state.grid[state.currentColumn]?.findIndex((c) => c.resolvedWithCard === 'SUBSTITUTE')
+        : -1;
+
+    const replayOpen =
+      state.subState === 'DRIBBLING' &&
+      (state.grid[state.currentColumn]?.some((c) => c.resolvedWithCard === 'REPLAY') ?? false);
+
+    if (isBlocked || replayOpen) {
       if (state.currentColumn === 0) {
-        // Encounter occurred on line 1: player stays at kickoff start spot
         const startX = gridStartX - 28;
         this.targetPos = { x: startX, y: centerY };
       } else {
         const prevCol = state.currentColumn - 1;
-        // Find the safe row that was previously cleared/bypassed in prevCol
         const prevRowIndex = state.grid[prevCol]?.findIndex(
           (c) => c.status === 'cleared' || c.status === 'bypassed' || c.resolvedWithCard === 'PASS'
         );
         const safeRow = prevRowIndex !== -1 ? prevRowIndex : (state.currentRow ?? 1);
-        const px = gridStartX + prevCol * cellWidth + cellWidth / 2;
-        const py = gridStartY + safeRow * cellHeight + cellHeight / 2;
-        this.targetPos = { x: px, y: py };
+        this.targetPos = stand(prevCol, safeRow);
       }
+    } else if (substituteRow !== undefined && substituteRow !== -1) {
+      this.targetPos = stand(state.currentColumn, substituteRow);
     } else if (isGoal) {
-      // RULE: The player stops OUTSIDE the penalty area and NEVER enters the goal!
-      // Only the ball travels into the net.
       const lastCol = GRID_COLS - 1;
       const lastRowIndex = state.grid[lastCol]?.findIndex(
         (c) => c.status === 'cleared' || c.status === 'bypassed' || c.resolvedWithCard === 'PASS'
       );
       const shootRow = lastRowIndex !== -1 ? lastRowIndex : (state.currentRow ?? 1);
-      const px = gridStartX + lastCol * cellWidth + cellWidth / 2;
-      const py = gridStartY + shootRow * cellHeight + cellHeight / 2;
-      this.targetPos = { x: px, y: py };
+      this.targetPos = stand(lastCol, shootRow);
     } else if (state.phase === 'STANDBY' || (state.phase === 'PLAYING' && state.currentColumn === 0)) {
-      // Kickoff halfway stance
       const startX = gridStartX - 28;
       this.targetPos = { x: startX, y: centerY };
     } else if (state.currentColumn > 0 && state.currentColumn <= GRID_COLS) {
-      // Dribbling safely at current defensive line
       const colIndex = Math.min(state.currentColumn - 1, GRID_COLS - 1);
       const rowIndex = state.currentRow !== null ? state.currentRow : 1;
-
-      const px = gridStartX + colIndex * cellWidth + cellWidth / 2;
-      const py = gridStartY + rowIndex * cellHeight + cellHeight / 2;
-      this.targetPos = { x: px, y: py };
+      this.targetPos = stand(colIndex, rowIndex);
     } else if (state.currentColumn > GRID_COLS) {
-      // Stay outside penalty box
       const lastCol = GRID_COLS - 1;
-      const px = gridStartX + lastCol * cellWidth + cellWidth / 2;
-      const py = gridStartY + (state.currentRow ?? 1) * cellHeight + cellHeight / 2;
-      this.targetPos = { x: px, y: py };
+      this.targetPos = stand(lastCol, state.currentRow ?? 1);
     }
 
     // Teleport if too far (e.g. game reset)
@@ -132,6 +133,7 @@ export class PlayerController {
     const dx = this.targetPos.x - this.currentPos.x;
     const dy = this.targetPos.y - this.currentPos.y;
     const isMoving = Math.hypot(dx, dy) > 2;
+    this.moving = isMoving;
 
     this.currentPos.x += dx * 0.16 * dt;
     this.currentPos.y += dy * 0.16 * dt;
@@ -139,8 +141,23 @@ export class PlayerController {
     const isCelebrating = this.sprite.pose === 'celebrating';
     const isTackled = this.sprite.pose === 'tackled';
     const bobY = this.animator.getBobY(isMoving, isCelebrating, isTackled);
+    const stride = Math.sin(this.animator.tick * 3.4);
 
-    this.sprite.container.position.set(this.currentPos.x, this.currentPos.y + bobY);
+    if (this.sprite.pose === 'dodging') {
+      this.sprite.stepDodge(dt, isMoving);
+    } else if (this.sprite.pose === 'shooting') {
+      this.sprite.stepAction(dt);
+    }
+    if (this.sprite.pose === 'running') {
+      this.sprite.setStride(isMoving ? stride : null);
+    }
+
+    this.sprite.container.scale.set(1, 1);
+    this.sprite.container.rotation = 0;
+    this.sprite.container.position.set(
+      Math.round(this.currentPos.x),
+      Math.round(this.currentPos.y + bobY)
+    );
 
     if (isMoving && !isTackled) {
       this.effects.generateRunningTurf(this.currentPos.x, this.currentPos.y, particles);

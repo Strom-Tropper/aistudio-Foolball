@@ -26,6 +26,7 @@ import { DribbleSystem } from './systems/DribbleSystem';
 import { CardSystem } from './systems/CardSystem';
 import { CashoutSystem } from './systems/CashoutSystem';
 import { AutoSystem } from './systems/AutoSystem';
+import { preloadCharacterSprites, characterFrames } from './entities/characterSprites';
 
 export interface FootballPitchViewCallbacks {
   onCellClick: (col: number, row: number) => void;
@@ -76,6 +77,11 @@ export class FootballPitchView {
   // State cache
   private lastState: GameState | null = null;
   private isShootingGoal = false;
+  private passedBlockers: DefenderSprite[] = [];
+  private blockerClock = 0;
+  private blockerFallStart = new Map<string, number>();
+  private goalShotPlayed = false;
+  private keeperDiveStarted = false;
 
   constructor(container: HTMLDivElement, callbacks: FootballPitchViewCallbacks) {
     this.canvasContainer = container;
@@ -119,6 +125,16 @@ export class FootballPitchView {
       return;
     }
 
+    await preloadCharacterSprites();
+    if (this.isDestroyed) {
+      app.destroy(true);
+      return;
+    }
+    this.player.sprite.redraw();
+    this.defender.tacklingSprite.redraw();
+    this.goalkeeper.sprite.redraw();
+    this.ball.sprite.redraw();
+
     this.app = app;
     this.canvasContainer.appendChild(app.canvas);
 
@@ -155,6 +171,7 @@ export class FootballPitchView {
    */
   public resize(newWidth: number, newHeight: number): void {
     if (!this.app) return;
+    if (newWidth === this.width && newHeight === this.height) return;
     this.width = newWidth;
     this.height = newHeight;
     this.app.renderer.resize(newWidth, newHeight);
@@ -215,9 +232,9 @@ export class FootballPitchView {
       .lineTo(startLineX, this.height - margin)
       .stroke({ width: 2.5, color: 0xffffff, alpha: 0.45 });
 
-    // Kickoff Center Arc
-    g.arc(startLineX, (this.height + topMargin) / 2, 54, -Math.PI / 2, Math.PI / 2)
-      .stroke({ width: 2, color: 0xffffff, alpha: 0.35 });
+    // Kickoff mark stays left of column 1 so it does not cover the board
+    g.arc(startLineX, (this.height + topMargin) / 2, 18, -Math.PI / 2, Math.PI / 2)
+      .stroke({ width: 1.5, color: 0xffffff, alpha: 0.28 });
 
     // 18-Yard Penalty Box
     const boxX = this.gridStartX + this.cellWidth * GRID_COLS + 4;
@@ -238,87 +255,6 @@ export class FootballPitchView {
     // Penalty Spot
     const penaltySpotX = boxX + Math.min(18, boxW * 0.4);
     g.rect(penaltySpotX - 2, boxY + boxH / 2 - 2, 4, 4).fill(0xffffff);
-
-    // =========================================================================
-    // FIELD-INTEGRATED TACTICAL GRID (Subtle, grass-integrated, field-themed)
-    // =========================================================================
-    // 1. Attack Channels / Lanes (Horizontal grass demarcations)
-    for (let r = 1; r < GRID_ROWS; r++) {
-      const laneY = this.gridStartY + r * this.cellHeight;
-      g.moveTo(startLineX, laneY)
-        .lineTo(boxX, laneY)
-        .stroke({ width: 1.5, color: 0xffffff, alpha: 0.16 });
-    }
-
-    // 2. Defensive Line Demarcations (Vertical grass mowing dashed lines)
-    for (let c = 0; c <= GRID_COLS; c++) {
-      const lineX = this.gridStartX + c * this.cellWidth;
-      const topY = this.gridStartY;
-      const botY = this.gridStartY + GRID_ROWS * this.cellHeight;
-      for (let y = topY; y < botY; y += 10) {
-        g.moveTo(lineX, y)
-          .lineTo(lineX, Math.min(y + 5, botY))
-          .stroke({ width: 1.2, color: 0xffffff, alpha: 0.14 });
-      }
-    }
-
-    // =========================================================================
-    // RETRO STADIUM ADVERTISING BOARDS (Iconic Nintendo World Cup Touchline A-Boards)
-    // =========================================================================
-    const boards = [
-      { text: '★ WORLD CUP 90 ★', bg: 0x991b1b, fg: 0xfef08a, border: 0xfacc15 },
-      { text: 'NEKKETSU KUNIO', bg: 0xca8a04, fg: 0x0f172a, border: 0xfef08a },
-      { text: 'ARCADE SOCCER', bg: 0x1d4ed8, fg: 0x93c5fd, border: 0x60a5fa },
-      { text: 'TECHNOS JAPAN', bg: 0x6b21a8, fg: 0xf5d0fe, border: 0xd8b4fe },
-      { text: 'SUPER STRIKER', bg: 0x065f46, fg: 0xa7f3d0, border: 0x34d399 },
-    ];
-
-    const boardWidth = Math.floor((this.width - 24) / boards.length);
-    for (let b = 0; b < boards.length; b++) {
-      const bx = 12 + b * boardWidth;
-      const board = boards[b];
-      // 3D Angled Billboard
-      g.rect(bx, 2, boardWidth - 4, 22).fill(board.bg);
-      g.rect(bx, 2, boardWidth - 4, 3).fill(0xffffff); // top rim light
-      g.rect(bx, 2, boardWidth - 4, 22).stroke({ width: 1.5, color: board.border });
-
-      // Retro text label
-      const boardText = new Text({
-        text: board.text,
-        style: new TextStyle({
-          fontFamily: 'Barlow Condensed, sans-serif',
-          fontSize: 9,
-          fontWeight: '900',
-          fill: board.fg,
-          letterSpacing: 1,
-        }),
-      });
-      boardText.anchor.set(0.5);
-      boardText.position.set(bx + (boardWidth - 4) / 2, 13);
-      this.pitchLayer.addChild(boardText);
-    }
-
-    // =========================================================================
-    // 3D CORNER FLAGS (Fluttering red cloth at all 4 corners)
-    // =========================================================================
-    const cornerPoints = [
-      { x: margin, y: topMargin },
-      { x: margin, y: this.height - margin },
-      { x: this.width - margin, y: topMargin },
-      { x: this.width - margin, y: this.height - margin },
-    ];
-
-    for (const cp of cornerPoints) {
-      // White flagpole
-      g.rect(cp.x - 1, cp.y - 12, 2, 12).fill(0xffffff);
-      g.rect(cp.x - 2, cp.y, 4, 2).fill(0x0f172a); // ground socket
-      // Red fluttering triangular flag
-      g.poly([
-        { x: cp.x, y: cp.y - 12 },
-        { x: cp.x + (cp.x < this.width / 2 ? 8 : -8), y: cp.y - 8 },
-        { x: cp.x, y: cp.y - 4 },
-      ]).fill(0xef4444);
-    }
 
     this.pitchLayer.addChild(g);
   }
@@ -361,21 +297,29 @@ export class FootballPitchView {
     this.goalNet.addChild(g);
 
     // Position Goalkeeper in center of goalmouth
-    this.goalkeeper.setPosition(netX - 16, (this.height + 28) / 2);
+    // The sprite is anchored at its feet, so offset it below the goal center
+    // to center the visible body inside the goal mouth.
+    this.goalkeeper.setPosition(netX - 16, (this.height + 28) / 2 + 32);
   }
 
   /**
    * Render Main Game Pipeline
    */
   public renderState(state: GameState): void {
+    const prevCardCount = this.lastState?.cardsUsedThisMatch.length ?? 0;
     this.lastState = state;
     if (!this.app) return;
+
+    if (state.currentColumn === 0 && state.subState !== 'BLOCKED') {
+      this.blockerFallStart.clear();
+    }
 
     this.gridLayer.removeChildren();
     this.gridLayer.addChild(this.dribbleSystem.pathGraphics);
 
     this.defenderLayer.removeChildren();
     this.defenderLayer.addChild(this.defender.container);
+    this.passedBlockers = [];
 
     this.uiLayer.removeChildren();
 
@@ -399,8 +343,7 @@ export class FootballPitchView {
       this.gridStartX,
       this.gridStartY,
       this.cellWidth,
-      this.cellHeight,
-      this.width
+      this.cellHeight
     );
 
     // Position ball relative to striker feet, tackled confrontation cell, or kickoff spot
@@ -417,11 +360,13 @@ export class FootballPitchView {
         const centerY = this.gridStartY + (this.cellHeight * GRID_ROWS) / 2;
         this.ball.setTarget(startX + 16, centerY + 4);
       } else if (state.subState === 'GOAL' || (state.phase === 'END' && state.lastRound?.result === 'GOAL_SCORED')) {
-        this.ball.setTarget(this.width - 16, this.height / 2);
+        const rest = this.ballInsideNet();
+        this.ball.setTarget(rest.x, rest.y);
       } else if (state.currentColumn > 0 && state.currentColumn <= GRID_COLS) {
         this.ball.setTarget(this.player.targetPos.x + 15, this.player.targetPos.y + 4);
       } else if (state.currentColumn > GRID_COLS) {
-        this.ball.setTarget(this.width - 16, this.height / 2);
+        const rest = this.ballInsideNet();
+        this.ball.setTarget(rest.x, rest.y);
       }
     }
 
@@ -443,20 +388,35 @@ export class FootballPitchView {
       state.subState === 'GOAL' ||
       (state.phase === 'END' && state.lastRound?.result === 'GOAL_SCORED');
 
+    const goalScored = state.subState === 'GOAL';
+    if (!goalScored && (state.phase !== 'PLAYING' || state.currentColumn === 0)) {
+      this.goalkeeper.setDiving(false);
+      this.goalShotPlayed = false;
+      this.keeperDiveStarted = false;
+    }
+    if (goalScored && !this.goalShotPlayed) {
+      this.goalShotPlayed = true;
+      this.triggerGoalShot();
+    }
+
+    const usedCard = state.cardsUsedThisMatch.length > prevCardCount;
+    const lastCard = state.cardsUsedThisMatch[state.cardsUsedThisMatch.length - 1];
+    const dodgeCard =
+      usedCard &&
+      (lastCard === 'PASS' || lastCard === 'SUBSTITUTE') &&
+      state.subState !== 'GOAL';
     if (isStrikerTackled) {
       this.player.setPose('tackled');
     } else if (this.isShootingGoal) {
       this.player.setPose('shooting');
     } else if (isStrikerCelebrating) {
       this.player.setPose('celebrating');
-    } else {
+    } else if (dodgeCard) {
+      this.player.playDodge();
+    } else if (this.player.sprite.pose !== 'dodging') {
       this.player.setPose('running');
     }
 
-    // 6. Handle Goal shooting animation trigger
-    if (state.phase === 'PLAYING' && state.subState === 'GOAL' && !this.isShootingGoal) {
-      this.triggerGoalShot();
-    }
   }
 
   /**
@@ -554,7 +514,17 @@ export class FootballPitchView {
 
     const isCurrentActiveCol = col === currentActiveCol;
     const isPastCol = col < state.currentColumn;
-    const isPlayerHere = state.currentColumn === col + 1 && state.currentRow === row;
+    const replayOpen =
+      state.subState === 'DRIBBLING' &&
+      (state.grid[state.currentColumn]?.some((c) => c.resolvedWithCard === 'REPLAY') ?? false);
+    let stoodRow = state.currentRow;
+    if (replayOpen && state.currentColumn > 0) {
+      const prevRow = state.grid[state.currentColumn - 1]?.findIndex(
+        (c) => c.status === 'cleared' || c.status === 'bypassed' || c.resolvedWithCard === 'PASS'
+      );
+      if (prevRow !== undefined && prevRow !== -1) stoodRow = prevRow;
+    }
+    const isPlayerHere = state.currentColumn === col + 1 && stoodRow === row;
     const isBlockedHere =
       state.currentColumn === col &&
       state.currentRow === row &&
@@ -566,18 +536,6 @@ export class FootballPitchView {
 
     const bgG = new Graphics();
 
-    // 1. Natural Grass-Integrated Football Lane & Cell Markings
-    const drawTacticalCorners = (graphics: Graphics, color: number, alpha: number, len = 7, strokeW = 1.5) => {
-      // Top-Left corner ⌜
-      graphics.moveTo(3, 3 + len).lineTo(3, 3).lineTo(3 + len, 3).stroke({ width: strokeW, color, alpha });
-      // Top-Right corner ⌝
-      graphics.moveTo(w - 3 - len, 3).lineTo(w - 3, 3).lineTo(w - 3, 3 + len).stroke({ width: strokeW, color, alpha });
-      // Bottom-Left corner ⌞
-      graphics.moveTo(3, h - 3 - len).lineTo(3, h - 3).lineTo(3 + len, h - 3).stroke({ width: strokeW, color, alpha });
-      // Bottom-Right corner ⌟
-      graphics.moveTo(w - 3 - len, h - 3).lineTo(w - 3, h - 3).lineTo(w - 3, h - 3 - len).stroke({ width: strokeW, color, alpha });
-    };
-
     const drawAttackChevron = (graphics: Graphics, color: number, alpha: number) => {
       const cx = w / 2;
       const cy = h / 2;
@@ -588,73 +546,65 @@ export class FootballPitchView {
         .stroke({ width: 2, color, alpha });
     };
 
+    const card = cell?.resolvedWithCard;
+    const isPassLane = card === 'PASS' || cell?.status === 'bypassed';
+    const isSubLane = card === 'SUBSTITUTE';
+    const isReplayLane = card === 'REPLAY';
+    const replayStillOpen = isReplayLane && isCurrentActiveCol;
+
+    const paintTile = (fill: number, fillAlpha: number, stroke: number, strokeAlpha: number, strokeW: number) => {
+      bgG.rect(0, 0, w, h).fill({ color: fill, alpha: fillAlpha });
+      bgG.rect(0, 0, w, h).stroke({ width: strokeW, color: stroke, alpha: strokeAlpha });
+    };
+
     if (isBlockedHere) {
-      // Scuffed turf slide-tackle clash patch
-      bgG.rect(0, 0, w, h).fill({ color: 0x7f1d1d, alpha: 0.45 });
-      bgG.rect(0, 0, w, h).stroke({ width: 1.5, color: 0xef4444, alpha: 0.8 });
-      drawTacticalCorners(bgG, 0xef4444, 0.9, 8, 2);
-    } else if (cell?.resolvedWithCard) {
-      // Tactically resolved line: subtle tactical blue turf tint with cyan chalk brackets
-      bgG.rect(0, 0, w, h).fill({ color: 0x0369a1, alpha: 0.22 });
-      bgG.rect(0, 0, w, h).stroke({ width: 1, color: 0x38bdf8, alpha: 0.4 });
-      drawTacticalCorners(bgG, 0x38bdf8, 0.85, 7, 1.5);
+      paintTile(0x7f1d1d, 0.72, 0xef4444, 1, 2.5);
+    } else if (isPassLane) {
+      paintTile(0x0369a1, 0.55, 0x7dd3fc, 1, 2);
+    } else if (isSubLane) {
+      paintTile(0x064e3b, 0.7, 0x34d399, 1, 2.5);
+    } else if (isReplayLane && !replayStillOpen) {
+      paintTile(0x7c2d12, 0.6, 0xfb923c, 1, 2);
     } else if (cell?.status === 'cleared' || isPlayerHere) {
-      // Cleared lane: trampled lush lawn turf with soft emerald border
-      bgG.rect(0, 0, w, h).fill({ color: 0x14532d, alpha: 0.3 });
-      bgG.rect(0, 0, w, h).stroke({ width: 1, color: 0x22c55e, alpha: 0.35 });
-      drawTacticalCorners(bgG, 0x86efac, 0.5, 6, 1.2);
+      paintTile(0x14532d, 0.62, 0x4ade80, 1, 2);
     } else if (isCurrentActiveCol) {
-      // CURRENT SELECTABLE FOOTBALL LANE:
-      // Sunlit emerald stadium grass spotlight + forward attacking run chevron
-      bgG.rect(0, 0, w, h).fill({ color: 0x22c55e, alpha: 0.18 });
-      bgG.rect(0, 0, w, h).stroke({ width: 1.5, color: 0x86efac, alpha: 0.65 });
-      drawTacticalCorners(bgG, 0xffffff, 0.9, 8, 2);
-      drawAttackChevron(bgG, 0xffffff, 0.75);
+      paintTile(0x166534, 0.78, 0xffffff, 1, 2.5);
+      drawAttackChevron(bgG, 0xffffff, 0.95);
 
       cellContainer.eventMode = 'static';
       cellContainer.cursor = 'pointer';
 
       cellContainer.on('pointerover', () => {
         bgG.clear();
-        bgG.rect(0, 0, w, h).fill({ color: 0x4ade80, alpha: 0.32 });
-        bgG.rect(0, 0, w, h).stroke({ width: 2, color: 0xa7f3d0, alpha: 0.95 });
-        drawTacticalCorners(bgG, 0xffffff, 1.0, 9, 2.5);
-        drawAttackChevron(bgG, 0xffffff, 0.95);
+        paintTile(0x22c55e, 0.88, 0xffffff, 1, 3);
+        drawAttackChevron(bgG, 0xffffff, 1);
       });
 
       cellContainer.on('pointerout', () => {
         bgG.clear();
-        bgG.rect(0, 0, w, h).fill({ color: 0x22c55e, alpha: 0.18 });
-        bgG.rect(0, 0, w, h).stroke({ width: 1.5, color: 0x86efac, alpha: 0.65 });
-        drawTacticalCorners(bgG, 0xffffff, 0.9, 8, 2);
-        drawAttackChevron(bgG, 0xffffff, 0.75);
+        paintTile(0x166534, 0.78, 0xffffff, 1, 2.5);
+        drawAttackChevron(bgG, 0xffffff, 0.95);
       });
 
       cellContainer.on('pointerdown', () => {
+        const cellCenterX = cellX + w / 2;
+        const footY = cellY + h / 2 + 18;
         if (cell?.hasDefender) {
-          const cellCenterX = cellX + w / 2;
-          const cellCenterY = cellY + h / 2;
-          this.player.setTarget(cellCenterX - 14, cellCenterY);
-          this.ball.setTarget(cellCenterX - 4, cellCenterY + 4);
+          this.player.setTarget(cellCenterX - 14, footY);
+          this.ball.setTarget(cellCenterX - 4, footY + 4);
 
-          this.defender.triggerConfrontation(col, row, cellCenterX, cellCenterY, () => {
+          this.defender.triggerConfrontation(col, row, cellCenterX, footY, () => {
             this.callbacks.onCellClick(col, row);
           });
         } else {
-          this.animationSystem.emitImpactSparks(cellX + w / 2, cellY + h / 2);
+          this.animationSystem.emitImpactSparks(cellCenterX, footY - 10);
           this.callbacks.onCellClick(col, row);
         }
       });
     } else if (isPastCol) {
-      // Past unselected lane: natural grass with faint tactical border
-      bgG.rect(0, 0, w, h).fill({ color: 0x052e16, alpha: 0.15 });
-      bgG.rect(0, 0, w, h).stroke({ width: 1, color: 0xffffff, alpha: 0.08 });
-      drawTacticalCorners(bgG, 0xffffff, 0.15, 5, 1);
+      paintTile(0x022c22, 0.42, 0xffffff, 0.35, 1.5);
     } else {
-      // Upcoming defensive lines: full grass pitch visible with subtle tactical corner brackets
-      // Avoids heavy board-game rectangles; ensures lanes and lines remain crystal clear
-      bgG.rect(0, 0, w, h).stroke({ width: 1, color: 0xffffff, alpha: 0.07 });
-      drawTacticalCorners(bgG, 0xffffff, 0.18, 5, 1);
+      paintTile(0x052e16, 0.5, 0xffffff, 0.78, 1.5);
     }
 
     cellContainer.addChildAt(bgG, 0);
@@ -662,62 +612,59 @@ export class FootballPitchView {
 
     // 2. DEFENDER VISIBILITY & RESOLUTION MARKERS
     // History should remain visible on the pitch!
-    const hasDefenderInThisCell = cell?.hasDefender;
-
-    // Check if resolved with tactical card
-    if (cell?.resolvedWithCard) {
-      // Draw defender in resolved pose (beaten for PASS, replay for REPLAY, shield for SHIELD, substitute for SUB)
+    const placeDefender = (pose: 'idle' | 'fall') => {
       const defSprite = new DefenderSprite();
-      const pose = this.defender.getPoseForCell(cell, false, isMatchEnded, isPastCol);
-      defSprite.draw(pose);
-      defSprite.container.position.set(cellX + w / 2, cellY + h / 2);
+      const fallFrames = characterFrames('fall');
+      const fallDuration = Math.max(fallFrames.length, 1) * 6;
+      const fallKey = `${col},${row}`;
+      let showIdle = pose === 'idle';
+      if (pose === 'fall') {
+        if (!this.blockerFallStart.has(fallKey)) {
+          this.blockerFallStart.set(fallKey, this.blockerClock);
+        }
+        const elapsed = this.blockerClock - (this.blockerFallStart.get(fallKey) ?? this.blockerClock);
+        showIdle = elapsed >= fallDuration;
+        if (!showIdle) {
+          defSprite.draw('fall');
+          defSprite.align(elapsed);
+        }
+      }
+      if (showIdle) {
+        defSprite.draw('idle');
+        defSprite.align(this.blockerClock);
+      }
+      this.passedBlockers.push(defSprite);
+      defSprite.container.position.set(cellX + w / 2, cellY + h / 2 + 18);
       this.defenderLayer.addChild(defSprite.container);
+    };
 
-      // Render tactical card resolution badge marker
-      this.cardSystem.renderResolutionMarker(cellContainer, cell.resolvedWithCard, w, h);
-    } else if (cell?.status === 'bypassed') {
-      // Bypassed defender
-      const defSprite = new DefenderSprite();
-      defSprite.draw('beaten');
-      defSprite.container.position.set(cellX + w / 2, cellY + h / 2);
-      this.defenderLayer.addChild(defSprite.container);
-      this.cardSystem.renderResolutionMarker(cellContainer, 'PASS', w, h);
-    } else if (isBlockedHere) {
-      // Currently tackled/blocked by defender
-      const defSprite = new DefenderSprite();
-      defSprite.draw('tackle');
-      defSprite.container.position.set(cellX + w / 2, cellY + h / 2);
-      this.defenderLayer.addChild(defSprite.container);
+    const passedColumn = col < state.currentColumn;
 
-      // Yellow/Red Card
+    if (isBlockedHere) {
+      placeDefender('fall');
+
       const cardG = new Graphics();
-      cardG.rect(cellX + w / 2 + 16, cellY + h / 2 - 20, 8, 12).fill(0xef4444);
-      cardG.rect(cellX + w / 2 + 16, cellY + h / 2 - 20, 8, 12).stroke({ width: 1, color: 0xffffff });
+      cardG.rect(cellX + w / 2 + 16, cellY + h / 2 - 8, 8, 12).fill(0xef4444);
+      cardG.rect(cellX + w / 2 + 16, cellY + h / 2 - 8, 8, 12).stroke({ width: 1, color: 0xffffff });
       this.uiLayer.addChild(cardG);
-    } else if (isScouted) {
-      // Scouted upcoming defender
-      const defSprite = new DefenderSprite();
-      defSprite.draw('guard');
-      defSprite.container.position.set(cellX + w / 2, cellY + h / 2);
-      defSprite.container.alpha = 0.95;
-      this.defenderLayer.addChild(defSprite.container);
 
+      if (state.isShieldArmed) {
+        this.cardSystem.renderResolutionMarker(cellContainer, 'SHIELD', w, h);
+      }
+    } else if (isPassLane || isSubLane || (isReplayLane && !replayStillOpen) || (passedColumn && cell?.hasDefender)) {
+      placeDefender('idle');
+      if (isPassLane) this.cardSystem.renderResolutionMarker(cellContainer, 'PASS', w, h);
+      if (isSubLane) this.cardSystem.renderResolutionMarker(cellContainer, 'SUBSTITUTE', w, h);
+      if (isReplayLane) this.cardSystem.renderResolutionMarker(cellContainer, 'REPLAY', w, h);
+    } else if (isReplayLane) {
+      this.cardSystem.renderResolutionMarker(cellContainer, 'REPLAY', w, h);
+    } else if (isScouted) {
       this.cardSystem.renderResolutionMarker(cellContainer, 'SCOUT', w, h);
-    } else if (isMatchEnded && hasDefenderInThisCell) {
-      // Reveal remaining defenders on match end
-      const defSprite = new DefenderSprite();
-      const isPast = col < state.currentColumn;
-      defSprite.draw(isPast ? 'beaten' : 'guard');
-      defSprite.container.position.set(cellX + w / 2, cellY + h / 2);
-      defSprite.container.alpha = isPast ? 0.45 : 0.8;
-      this.defenderLayer.addChild(defSprite.container);
     }
 
     // 3. Footprint cleat stud trail on cleared lines
     if (isPastCol && cell?.status === 'cleared') {
-      const cleatG = new Graphics();
-      this.player.effects.drawCleatPrints(cleatG, w, h);
-      cellContainer.addChild(cleatG);
+      this.player.effects.drawCleatPrints(cellContainer, w, h);
     }
   }
 
@@ -742,19 +689,22 @@ export class FootballPitchView {
     );
     const shootRow =
       lastRowIndex !== -1 && lastRowIndex !== undefined ? lastRowIndex : (this.lastState?.currentRow ?? 1);
-    const shootingSpotY = this.gridStartY + shootRow * this.cellHeight + this.cellHeight / 2;
+    const shootingSpotY = this.gridStartY + shootRow * this.cellHeight + this.cellHeight / 2 + 18;
 
-    this.player.setTarget(shootingSpotX, shootingSpotY);
+    this.player.setPosition(shootingSpotX, shootingSpotY);
     this.player.setPose('shooting');
 
-    // 2. Ball launches toward goal net
-    const netX = this.width - 16;
-    const netY = this.height / 2;
-    this.ball.setPosition(shootingSpotX + 16, shootingSpotY + 4);
-    this.ball.shootAtGoal(netX, netY);
+    const rest = this.ballInsideNet();
+    this.ball.container.visible = true;
+    this.ball.setPosition(shootingSpotX + 16, shootingSpotY - 8);
+    this.ball.shootAtGoal(rest.x, rest.y);
+  }
 
-    // 3. Goalkeeper reacts with diving leap
-    this.goalkeeper.setDiving(true);
+  private ballInsideNet(): { x: number; y: number } {
+    const netX = this.width - 20;
+    const netH = Math.min(160, this.cellHeight * 2.5);
+    const netY = (this.height + 28 - netH) / 2;
+    return { x: netX + 8, y: netY + netH * 0.58 };
   }
 
   /**
@@ -770,6 +720,8 @@ export class FootballPitchView {
     this.animationSystem.updateShockwave(dt);
     this.animationSystem.updateParticles(dt);
     this.dribbleSystem.update(dt);
+    this.blockerClock += dt;
+    for (const blocker of this.passedBlockers) blocker.step(dt);
 
     if (this.lastState) {
       const route = this.dribbleSystem.calculateRoute(
@@ -786,7 +738,7 @@ export class FootballPitchView {
     const isPlaying = this.lastState?.phase === 'PLAYING';
     this.goalkeeper.update(
       dt,
-      this.height / 2,
+      (this.height + 28) / 2,
       this.player.currentPos.y,
       this.ball.currentPos.y,
       isPlaying,
@@ -807,14 +759,21 @@ export class FootballPitchView {
     // 4. Update Striker & Ball Controllers
     this.player.update(dt, this.animationSystem.particles);
 
+    if (this.isShootingGoal && this.ball.animator.hasLaunched && !this.keeperDiveStarted) {
+      this.keeperDiveStarted = true;
+      this.goalkeeper.setDiving(true);
+    }
+
     this.ball.update(dt, this.animationSystem.particles, () => {
       this.isShootingGoal = false;
-      this.goalkeeper.setDiving(false);
-      this.collisionSystem.triggerGoalImpact(this.width - 16, this.height / 2);
+      const rest = this.ballInsideNet();
+      this.collisionSystem.triggerGoalImpact(rest.x, rest.y);
       if (this.callbacks.onGoalShootComplete) {
         this.callbacks.onGoalShootComplete();
       }
     });
+    const ballIsInDribble = this.player.sprite.pose === 'running' && this.player.moving;
+    this.ball.container.visible = this.isShootingGoal || !ballIsInDribble;
 
     // 5. Confetti celebration shower if in Goal state
     if (this.lastState?.subState === 'GOAL') {

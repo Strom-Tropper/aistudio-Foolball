@@ -56,10 +56,20 @@ export class BallController {
       this.currentPos.x = shot.x;
       this.currentPos.y = shot.y;
       this.animator.updateRotation(true, dt);
-      this.effects.generateShotSparks(this.currentPos.x, this.currentPos.y, particles);
+      this.sprite.container.visible = true;
+      if (!this.animator.hasLaunched || shot.isComplete) {
+        this.sprite.setClip('ballSpin');
+      } else if (this.animator.flightProgress >= 0.55) {
+        this.sprite.setClip('ballFire');
+      } else {
+        this.sprite.setClip('ballFast');
+      }
 
-      if (shot.isComplete && onShotComplete) {
-        onShotComplete();
+      if (shot.isComplete) {
+        this.targetPos.x = shot.x;
+        this.targetPos.y = shot.y;
+        this.sprite.setClip('ballSpin');
+        if (onShotComplete) onShotComplete();
       }
     } else {
       const dx = this.targetPos.x - this.currentPos.x;
@@ -70,13 +80,11 @@ export class BallController {
       this.currentPos.y += dy * 0.22 * dt;
 
       this.animator.updateRotation(isMoving, dt);
-
-      if (isMoving) {
-        this.effects.generateDribbleTrail(this.currentPos.x, this.currentPos.y, particles);
-      }
+      this.sprite.setClip('ballSpin');
     }
-
+    this.sprite.step(dt);
     this.sprite.container.position.set(this.currentPos.x, this.currentPos.y);
-    this.sprite.container.rotation = this.animator.currentRotation;
+    this.sprite.container.rotation = 0;
+    this.sprite.setElevation(this.animator.isShotActive ? 0 : this.animator.hop);
   }
 }

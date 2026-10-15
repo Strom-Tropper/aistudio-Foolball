@@ -3,8 +3,9 @@
  * Responsibility: Striker feedback, grass kick-up, cleat stud marks, and celebration effects
  */
 
-import { Graphics } from 'pixi.js';
+import { Container, Sprite } from 'pixi.js';
 import { ActionParticle } from '../../systems/AnimationSystem';
+import { characterFrames } from '../characterSprites';
 
 export class PlayerEffects {
   /**
@@ -27,18 +28,17 @@ export class PlayerEffects {
   }
 
   /**
-   * Draw cleat stud footprints in a cleared pitch cell
+   * Cleat prints left behind on a cleared pitch cell, toes pointing right
    */
-  public drawCleatPrints(g: Graphics, w: number, h: number): void {
-    // Left cleat print
-    g.ellipse(w / 2 - 6, h / 2 - 3, 3, 5).fill({ color: 0xfacc15, alpha: 0.65 });
-    g.rect(w / 2 - 7, h / 2 + 1, 2, 2).fill(0xffffff);
-    g.rect(w / 2 - 5, h / 2 + 1, 2, 2).fill(0xffffff);
-
-    // Right cleat print
-    g.ellipse(w / 2 + 6, h / 2 + 3, 3, 5).fill({ color: 0xfacc15, alpha: 0.65 });
-    g.rect(w / 2 + 5, h / 2 + 7, 2, 2).fill(0xffffff);
-    g.rect(w / 2 + 7, h / 2 + 7, 2, 2).fill(0xffffff);
+  public drawCleatPrints(parent: Container, w: number, h: number): void {
+    const frames = characterFrames('footprint');
+    frames.forEach((texture, index) => {
+      const mark = new Sprite(texture);
+      mark.anchor.set(0.5, 0.5);
+      mark.scale.set(2);
+      mark.position.set(w / 2 + (index === 0 ? -8 : 6), h / 2 + (index === 0 ? -5 : 5));
+      parent.addChild(mark);
+    });
   }
 
   /**

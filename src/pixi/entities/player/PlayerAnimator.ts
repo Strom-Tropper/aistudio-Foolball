@@ -15,19 +15,15 @@ export class PlayerAnimator {
    */
   public getBobY(isMoving: boolean, isCelebrating: boolean, isTackled: boolean): number {
     if (isTackled) {
-      // Slight dizzy wobble
-      return Math.sin(this.animTick * 3) * 1.2;
+      return Math.sin(this.animTick * 4) * 3;
     }
     if (isCelebrating) {
-      // Energetic victory jumping bounce
-      return Math.abs(Math.sin(this.animTick * 2.5)) * -6;
+      return Math.abs(Math.sin(this.animTick * 2.8)) * -8;
     }
     if (isMoving) {
-      // Pumping running stride bob
-      return Math.sin(this.animTick * 2.2) * 2.5;
+      return Math.abs(Math.sin(this.animTick * 3.4)) * -4;
     }
-    // Idle breathing
-    return Math.sin(this.animTick * 0.8) * 0.8;
+    return Math.sin(this.animTick * 1.1) * 2;
   }
 
   public get tick(): number {

@@ -4,8 +4,10 @@
  *
  * Rules:
  * - Every path segment is generated strictly from resolved player decisions.
- * - PASS, REPLAY, SHIELD and SUBSTITUTE states update the single authoritative route.
- * - No separate visual histories or disjointed lines.
+ * - Only a cleared lane or PASS extends the attack route.
+ * - REPLAY retries the current column and does not extend the route.
+ * - SUBSTITUTE stays on the blocked confrontation and does not extend the route.
+ * - SHIELD preserves payout and does not change the route.
  * - The player's dribble route ends outside the penalty area; only the ball enters the net.
  */
 
@@ -36,13 +38,8 @@ export class DribbleSystem {
     cellHeight: number
   ): RoutePoint[] {
     const route: RoutePoint[] = [];
-    const startLineX = gridStartX - 24;
-    const startLineY = gridStartY + (GRID_ROWS * cellHeight) / 2;
 
-    // 1. Kickoff origin point
-    route.push({ x: startLineX, y: startLineY, type: 'kickoff' });
-
-    // 2. Exact sequence of cells visited and successfully resolved by the player
+    // Cells the player actually cleared or passed. No kickoff slash and no guide line.
     for (let c = 0; c < GRID_COLS; c++) {
       if (!state.grid[c]) break;
 
@@ -50,6 +47,13 @@ export class DribbleSystem {
 
       for (let r = 0; r < GRID_ROWS; r++) {
         const cell = state.grid[c][r];
+        if (
+          cell.resolvedWithCard === 'REPLAY' ||
+          cell.resolvedWithCard === 'SUBSTITUTE' ||
+          cell.resolvedWithCard === 'SHIELD'
+        ) {
+          continue;
+        }
         if (cell.resolvedWithCard === 'PASS' || cell.status === 'bypassed') {
           resolvedCell = { r, type: 'bypassed' };
           break;
@@ -90,37 +94,15 @@ export class DribbleSystem {
     this.pathGraphics.clear();
     if (route.length < 2) return;
 
-    // 1. Luminous arcade emerald aura glow
     this.pathGraphics.moveTo(route[0].x, route[0].y);
     for (let i = 1; i < route.length; i++) {
       this.pathGraphics.lineTo(route[i].x, route[i].y);
     }
-    this.pathGraphics.stroke({ width: 7, color: 0x22c55e, alpha: 0.28 });
+    this.pathGraphics.stroke({ width: 3, color: 0xbbf7d0, alpha: 0.95 });
 
-    // 2. High-contrast crisp tactical progression tracer
-    this.pathGraphics.moveTo(route[0].x, route[0].y);
-    for (let i = 1; i < route.length; i++) {
-      this.pathGraphics.lineTo(route[i].x, route[i].y);
-    }
-    this.pathGraphics.stroke({ width: 2.5, color: 0x4ade80, alpha: 0.9 });
-
-    // 3. Tactical Waypoint Nodes
     for (let i = 1; i < route.length; i++) {
       const pt = route[i];
-      const isBypassed = pt.type === 'bypassed';
-      const nodeColor = isBypassed ? 0x38bdf8 : 0x86efac;
-
-      // Outer ring
-      this.pathGraphics.circle(pt.x, pt.y, 4.5).fill({ color: nodeColor, alpha: 0.9 });
-      // Core stud
-      this.pathGraphics.circle(pt.x, pt.y, 2).fill(0xffffff);
-
-      // If bypassed via PASS, draw distinctive tactical bypass arc
-      if (isBypassed) {
-        this.pathGraphics
-          .arc(pt.x, pt.y, 8, -Math.PI * 0.7, Math.PI * 0.7)
-          .stroke({ width: 1.5, color: 0x38bdf8, alpha: 0.8 });
-      }
+      this.pathGraphics.circle(pt.x, pt.y, 3).fill({ color: 0xffffff, alpha: 0.95 });
     }
   }
 }
